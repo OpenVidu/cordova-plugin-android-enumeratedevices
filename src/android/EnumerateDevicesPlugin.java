@@ -7,100 +7,147 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.IOException;
-import java.util.List;
-
+import android.annotation.TargetApi;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 
-import android.media.MicrophoneInfo;
 import android.media.AudioManager;
 import android.media.AudioDeviceInfo;
-import java.util.ArrayList;
-
-
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.bluetooth.BluetoothDevice;
+import android.os.Build;
+import android.support.annotation.RequiresApi;
+import android.widget.Toast;
+import android.content.IntentFilter;
 
 import android.app.Activity;
 import android.content.Context;
-
 
 /**
  * This class echoes a string called from JavaScript.
  */
 public class EnumerateDevicesPlugin extends CordovaPlugin {
+   
+    static final String FRONT_CAM = "Front Camera";
+    static final String BACK_CAM = "Back Camera";
+    static final String EXTERNAL_CAM = "External Camera";
+    static final String UNKNOWN_CAM = "Unknown Camera";
+
+    static final String BUILTIN_MIC = "Built-in Microphone";
+    static final String BLUETOOTH_MIC = "Bluetooth";
+    static final String WIRED_MIC = "Wired Microphone";
+    static final String USB_MIC = "USB Microphone";
+    static final String UNKNOWN_MIC = "Unknown Microphone";
+
     private Context context;
     private Activity activity;
-    JSONArray devicesArray = new JSONArray();
+    AudioManager audioManager;
+    JSONArray devicesArray;
 
 
-
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
     @Override
     public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
-        if (action.equals("enumerateDevices")){
+        this.context = cordova.getActivity().getApplicationContext();
+        this.activity = cordova.getActivity();
+        this.audioManager = (AudioManager) this.activity.getSystemService(this.context.AUDIO_SERVICE);
+
+        if (action.equals("enumerateDevices")) {
 
             this.enumerateDevices(args, callbackContext);
+            return true;
 
+        } else if (action.equals("addDeviceListener")) {
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(BluetoothDevice.ACTION_ACL_CONNECTED);
+            filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED);
+            filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED);
+            filter.addAction(Intent.ACTION_HEADSET_PLUG);
+            context.registerReceiver(BTReceiver, filter);
             return true;
         }
         return false;
     }
 
-    private void enumerateDevices(JSONArray args, CallbackContext callback){
+    // The BroadcastReceiver that listens for bluetooth broadcasts
+    private final BroadcastReceiver BTReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
 
-        this.context = cordova.getActivity().getApplicationContext();
-        this.activity = cordova.getActivity();
+            if (BluetoothDevice.ACTION_ACL_CONNECTED.equals(action)) {
+                Toast.makeText(context, "Bluetooth connected", Toast.LENGTH_SHORT).show();
+            } else if (BluetoothDevice.ACTION_ACL_DISCONNECTED.equals(action)) {
+                Toast.makeText(context, "Bluetooth disconnected", Toast.LENGTH_SHORT).show();
+            } else if (Intent.ACTION_HEADSET_PLUG.equals(action)) {
+                int state = intent.getIntExtra("state", -1);
+                switch (state) {
+                    case 0:
+                        Toast.makeText(context, "Wired device disconnected", Toast.LENGTH_SHORT).show();
+                        break;
+                    case 1:
+                        Toast.makeText(context, "Wired device connected", Toast.LENGTH_SHORT).show();
+                        break;
+                    default:
+                        break;
+                }
+            }
+            fireEvent("devicechange");
+        }
+    };
+
+    @TargetApi(Build.VERSION_CODES.M)
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    private void enumerateDevices(JSONArray args, CallbackContext callback) {
+
         this.devicesArray = new JSONArray();
 
         this.getMics();
         this.getCams();
-
         callback.success(this.devicesArray);
-
     }
 
-    private void getMics () {
-        AudioManager audioManager = (AudioManager) this.activity.getSystemService(this.context.AUDIO_SERVICE);
-        ArrayList<String> str = new ArrayList();
-        AudioDeviceInfo[] mics = audioManager.getDevices(AudioManager.GET_DEVICES_ALL);
+    @RequiresApi(api = Build.VERSION_CODES.M)
+    private void getMics() {
+        AudioDeviceInfo[] mics = this.audioManager.getDevices(AudioManager.GET_DEVICES_ALL);
         String label = "";
-        audioManager.setMode(AudioManager.MODE_IN_CALL);
 
         for (int i = 0; i < mics.length; i++) {
             Integer type = mics[i].getType();
-            if( (type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || type == AudioDeviceInfo.TYPE_BUILTIN_MIC || type == AudioDeviceInfo.TYPE_WIRED_HEADSET || type == AudioDeviceInfo.TYPE_USB_DEVICE) && mics[i].isSource()) {
+            if ((type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || type == AudioDeviceInfo.TYPE_BUILTIN_MIC
+                    || type == AudioDeviceInfo.TYPE_WIRED_HEADSET || type == AudioDeviceInfo.TYPE_USB_DEVICE)
+                    ) {
                 JSONObject device = new JSONObject();
 
                 label = this.getAudioType(mics[i]);
                 try {
-                    device.put("deviceId", Integer.toString( mics[i].getId()));
+                    device.put("deviceId", Integer.toString(mics[i].getId()));
                     device.put("groupId", "");
                     device.put("kind", "audioinput");
                     device.put("label", label);
                     this.devicesArray.put(device);
-
                 } catch (JSONException e) {
                     System.out.println("ERROR JSONException " + e.toString());
                 }
             }
-
         }
-
     }
 
-
-    private void getCams () {
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    private void getCams() {
         // Video inputs
         CameraManager camera = (CameraManager) this.activity.getSystemService(this.context.CAMERA_SERVICE);
 
         try {
             String[] cameraId = camera.getCameraIdList();
             CameraCharacteristics characteristics;
-            String label  =  "";
+            String label = "";
 
-            for(int i = 0; i < cameraId.length; i++) {
+            for (int i = 0; i < cameraId.length; i++) {
                 JSONObject device = new JSONObject();
-                characteristics  = camera.getCameraCharacteristics(cameraId[i]);
+                characteristics = camera.getCameraCharacteristics(cameraId[i]);
                 label = this.getVideoType(characteristics);
                 device.put("deviceId", cameraId[i]);
                 device.put("groupId", "");
@@ -115,34 +162,35 @@ public class EnumerateDevicesPlugin extends CordovaPlugin {
         } catch (JSONException e) {
             System.out.println("ERROR IOException " + e.toString());
         }
-
     }
 
-
-    private String getAudioType(AudioDeviceInfo input){
+    @RequiresApi(api = Build.VERSION_CODES.M)
+    private String getAudioType(AudioDeviceInfo input) {
         String deviceType = "";
 
         switch (input.getType()) {
             case AudioDeviceInfo.TYPE_BLUETOOTH_SCO:
-                deviceType = input.getProductName().toString() + " Bluetooth";
+                deviceType = input.getProductName().toString() + " " + BLUETOOTH_MIC;
                 break;
             case AudioDeviceInfo.TYPE_BUILTIN_MIC:
-                deviceType = input.getProductName().toString() + " Built-in Microphone";
+                deviceType = input.getProductName().toString() + " " + BUILTIN_MIC;
                 break;
             case AudioDeviceInfo.TYPE_WIRED_HEADSET:
-                deviceType = input.getProductName().toString() + " Wired Microphone";
+                deviceType = input.getProductName().toString() + " " + WIRED_MIC;
                 break;
             case AudioDeviceInfo.TYPE_USB_DEVICE:
-                deviceType = input.getProductName().toString() + " USB Microphone";
+                deviceType = input.getProductName().toString() + " " + USB_MIC;
                 break;
             default:
-                deviceType = "Unknown device";
+                deviceType = UNKNOWN_MIC;
+                break;
         }
 
         return deviceType;
     }
 
-    private String getVideoType(CameraCharacteristics input){
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    private String getVideoType(CameraCharacteristics input) {
         String deviceType = "";
         String num = "";
 
@@ -150,7 +198,7 @@ public class EnumerateDevicesPlugin extends CordovaPlugin {
             for (int i = 0; i < this.devicesArray.length(); ++i) {
                 JSONObject obj = this.devicesArray.getJSONObject(i);
                 String id = obj.getString("label");
-                if (id.contains("External")) {
+                if (id.contains(EXTERNAL_CAM)) {
                     num = Integer.toString(Integer.parseInt(num) + 1);
                 }
             }
@@ -160,20 +208,28 @@ public class EnumerateDevicesPlugin extends CordovaPlugin {
 
         switch (input.get(CameraCharacteristics.LENS_FACING)) {
             case CameraCharacteristics.LENS_FACING_FRONT:
-                deviceType = "Front Camera";
+                deviceType = FRONT_CAM;
                 break;
             case CameraCharacteristics.LENS_FACING_BACK:
-                deviceType = "Back Camera";
+                deviceType = BACK_CAM;
                 break;
             case CameraCharacteristics.LENS_FACING_EXTERNAL:
-                deviceType = "External Camera" + num;
+                deviceType = EXTERNAL_CAM + " " + num;
                 break;
             default:
-                deviceType = "Unknown device";
+                deviceType = UNKNOWN_CAM;
         }
 
         return deviceType;
-
     }
 
+    public void fireEvent(String eventName) {
+
+        final String js = "javascript:(function(){" +
+                "var event = new CustomEvent('" + eventName + "');" +
+                "setTimeout(() => { navigator.mediaDevices.dispatchEvent(event); }, 500);" +
+                "})()";
+
+        this.activity.runOnUiThread(() -> webView.loadUrl(js));
+    }
 }
