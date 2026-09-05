@@ -1,4 +1,11 @@
 # cordova-plugin-android-enumeratedevices
+
+> [!WARNING]
+> **This repository is deprecated.** OpenVidu's mobile approach is no longer based on
+> Cordova. OpenVidu 3 is API-compatible with LiveKit — use the
+> [native LiveKit mobile SDKs](https://openvidu.io/latest/docs/reference/client-sdk/)
+> (Android, iOS, Flutter, React Native) instead.
+
 Cordova Android plugin exposing the audio and video devices connected
 
 
